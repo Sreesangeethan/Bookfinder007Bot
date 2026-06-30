@@ -1,46 +1,60 @@
 import os
-import telebot
-import requests
+import logging
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")  # We'll set this on Render
+# Logging (helpful for debugging on Render)
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-bot = telebot.TeleBot(BOT_TOKEN)
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👋 Welcome to Legal Book Bot!\n\n"
+        "Send me a book title or author.\n"
+        "I search public domain & open sources only.\n"
+        "Respect copyright!"
+    )
 
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
-    bot.reply_to(message, "👋 Legal Book Bot\nSend title or author.\nRespect copyright!")
-
-
-@bot.message_handler(func=lambda m: True)
-def search(message):
-    query = message.text.strip()
+async def search_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.message.text.strip()
     if len(query) < 3:
-        return bot.reply_to(message, "Query too short.")
+        await update.message.reply_text("Please type a longer search term.")
+        return
 
-    bot.reply_to(message, f"🔍 Searching '{query}'...")
+    await update.message.reply_text(f"🔍 Searching for '{query}' in legal sources...")
 
     try:
-        resp = requests.get(f"https://gutendex.com/books?search={query.replace(' ', '%20')}", timeout=10)
+        import requests
+        resp = requests.get(
+            f"https://gutendex.com/books?search={query.replace(' ', '%20')}", 
+            timeout=15
+        )
         data = resp.json()
-
-        sent = False
-        for book in data.get('results', [])[:8]:
+        
+        found = False
+        for book in data.get('results', [])[:6]:
             formats = book.get('formats', {})
-            link = (formats.get('application/epub+zip') or
-                    formats.get('text/plain; charset=utf-8') or
-                    list(formats.values())[0] if formats else None)
-
+            link = (formats.get('application/epub+zip') or 
+                    formats.get('text/plain; charset=utf-8') or 
+                    formats.get('application/pdf') or 
+                    next(iter(formats.values()), None))
+            
             if link:
-                author = ', '.join(a.get('name', '') for a in book.get('authors', []))
-                text = f"**{book.get('title')}**\n{author}\n[Download]({link})"
-                bot.send_message(message.chat.id, text, parse_mode='Markdown')
-                sent = True
-        if not sent:
-            bot.reply_to(message, "No results found in public domain sources.")
-    except:
-        bot.reply_to(message, "Search failed. Try again.")
+                author = ', '.join(a.get('name', 'Unknown') for a in book.get('authors', []))
+                text = f"📖 **{book.get('title')}**\n👤 {author}\n🔗 [Download]({link})"
+                await update.message.reply_text(text, parse_mode='Markdown', disable_web_page_preview=True)
+                found = True
+        if not found:
+            await update.message.reply_text("No results found. Try classic/public domain books.")
+    except Exception as e:
+        await update.message.reply_text("Search failed. Please try again later.")
 
-
-print("Bot started successfully!")
-bot.infinity_polling()
+if __name__ == '__main__':
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_book))
+    
+    print("Bot is running...")
+    app.run_polling()
