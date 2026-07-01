@@ -1,15 +1,15 @@
 import os
 import logging
-import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 
 logging.basicConfig(level=logging.INFO)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+PORT = int(os.environ.get("PORT", 8443))
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Legal Book Bot\nSend title or author (English recommended).")
+    await update.message.reply_text("👋 Legal Book Bot\nSend a book title or author.")
 
 async def search_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.message.text.strip()
@@ -20,12 +20,9 @@ async def search_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🔍 Searching '{query}'...")
 
     try:
+        import requests
         headers = {'User-Agent': 'BookBot/1.0'}
-        resp = requests.get(
-            f"https://gutendex.com/books?search={query.replace(' ', '%20')}",
-            headers=headers,
-            timeout=15
-        )
+        resp = requests.get(f"https://gutendex.com/books?search={query.replace(' ', '%20')}", headers=headers, timeout=15)
         data = resp.json()
 
         found = False
@@ -38,15 +35,21 @@ async def search_book(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(text, parse_mode='Markdown')
                 found = True
         if not found:
-            await update.message.reply_text("No results. Try 'Pride and Prejudice' or 'Sherlock Holmes'.")
-    except Exception as e:
-        logging.error(str(e))
-        await update.message.reply_text("Search failed. Try again later.")
+            await update.message.reply_text("No results found.")
+    except:
+        await update.message.reply_text("Search failed. Try again.")
 
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_book))
     
-    print("✅ Bot is starting...")
-    app.run_polling()
+    print("✅ Bot started successfully!")
+    
+    # Use webhook for Render
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=BOT_TOKEN,
+        webhook_url=f"https://bookfinder007bot.onrender.com/{BOT_TOKEN}"
+    )
